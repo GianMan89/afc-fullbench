@@ -1,4 +1,4 @@
-"""Model factory for configuration-driven experiments."""
+"""Model factory for configuration-driven full-episode AFC experiments."""
 
 from __future__ import annotations
 
@@ -41,19 +41,49 @@ DISPLAY_NAMES = {
     "CASIM": "CASIM",
 }
 
+# Parameter names used only by AFC-RobustBench online prefix wrappers.  They are
+# intentionally ignored here because AFC-FullBench trains one model per complete
+# episode, not prefix-specific classifiers.
+_ONLINE_ONLY_KEYS = {
+    "training_mode",
+    "training_strategy",
+    "prefix_grid",
+    "prefix_reference",
+    "prefix_train_reference",
+    "prefix_selection",
+    "prefix_train_horizon",
+    "prefix_min_time_steps",
+    "include_full_prefix",
+}
+
+
+def _clean_full_episode_params(params: dict[str, Any]) -> dict[str, Any]:
+    """Remove online-only parameters from AFC-RobustBench configurations."""
+
+    return {key: value for key, value in params.items() if key not in _ONLINE_ONLY_KEYS}
+
 
 def make_model(name: str, params: dict[str, Any] | None = None):
-    """Instantiate a model by registry name."""
+    """Instantiate a full-episode AFC model by registry name.
+
+    The factory accepts the same baseline method names used in AFC-RobustBench.
+    If a copied configuration contains online-prefix wrapper keys, those keys are
+    removed because they have no meaning for full-episode classification.
+    """
+
     if name not in MODEL_REGISTRY:
         raise KeyError(f"unknown model name: {name}; available: {available_models()}")
-    return MODEL_REGISTRY[name](**({} if params is None else dict(params)))
+    clean_params = _clean_full_episode_params({} if params is None else dict(params))
+    return MODEL_REGISTRY[name](**clean_params)
 
 
 def display_name(name: str) -> str:
     """Return canonical display name for a registry key."""
+
     return DISPLAY_NAMES.get(name, str(name))
 
 
 def available_models() -> list[str]:
     """Return supported registry keys."""
+
     return sorted(MODEL_REGISTRY)

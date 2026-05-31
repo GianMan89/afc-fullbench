@@ -1,30 +1,86 @@
-"""Exponentially attenuated components 1-nearest-neighbor classifier."""
+"""Exponentially attenuated component nearest-neighbor classifier."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Literal
+
 import numpy as np
-from sklearn.neighbors import KNeighborsClassifier
 
-from afc_fullbench.models.base import AFCClassifier
-from afc_fullbench.representations import eac_features
+from afc_fullbench.models.base import AFCClassifier, ensure_3d, stable_softmax_from_scores
+from afc_fullbench.representations import activation_sequence_from_series
+
+TimeScale = Literal["event_index", "time_index"]
+Distance = Literal["euclidean", "cosine"]
 
 
+@dataclass
 class EAC1NN(AFCClassifier):
-    """Sequence-based exponentially attenuated component 1-NN classifier."""
+    """Sequence-based exponentially attenuated component 1-NN classifier.
 
-    def __init__(self, *, attenuation: float = 0.01, metric: str = "euclidean"):
-        self.attenuation = float(attenuation)
-        self.metric = str(metric)
+    Each alarm activation contributes ``exp(-attenuation * t)`` to the component
+    corresponding to its alarm tag.  ``t`` is either the event index in the
+    activation sequence or the discrete time index.
+    """
+
+    attenuation: float = 0.001
+    time_scale: TimeScale = "event_index"
+    distance: Distance = "euclidean"
+    normalize: bool = True
+    name: str = "EAC-1NN"
+
+    def _transform_one(self, sample: np.ndarray) -> np.ndarray:
+        """Transform one complete alarm episode to an EAC feature vector."""
+
+        n_tags = sample.shape[0]
+        vec = np.zeros(n_tags, dtype=float)
+        seq = activation_sequence_from_series(sample)
+        for event_index, (tag, time_idx) in enumerate(seq):
+            t = event_index if self.time_scale == "event_index" else time_idx
+            vec[tag] += float(np.exp(-float(self.attenuation) * t))
+        if self.normalize:
+            norm = np.linalg.norm(vec)
+            if norm > 0:
+                vec = vec / norm
+        return vec
+
+    def _transform(self, X: np.ndarray) -> np.ndarray:
+        """Transform a batch of complete alarm episodes."""
+
+        X = ensure_3d(X)
+        return np.stack([self._transform_one(sample) for sample in X])
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> "EAC1NN":
-        Z = eac_features(X, attenuation=self.attenuation)
-        self.model_ = KNeighborsClassifier(n_neighbors=1, metric=self.metric)
-        self.model_.fit(Z, y)
+        """Store training EAC features and labels."""
+
+        self.classes_ = np.unique(y)
+        self.y_train_ = np.asarray(y)
+        self.X_feat_ = self._transform(X)
         return self
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
-        Z = eac_features(X, attenuation=self.attenuation)
-        return self.model_.predict(Z)
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """Return softmax-normalized negative class-wise nearest distances."""
 
-    def get_params(self) -> dict:
-        return {"attenuation": self.attenuation, "metric": self.metric}
+        feat = self._transform(X)
+        min_dist = np.full((feat.shape[0], len(self.classes_)), np.inf, dtype=float)
+        for i, row in enumerate(feat):
+            if self.distance == "cosine":
+                denom = np.linalg.norm(self.X_feat_, axis=1) * max(np.linalg.norm(row), 1e-12)
+                sim = np.divide(self.X_feat_ @ row, denom, out=np.zeros_like(denom), where=denom > 0)
+                dist = 1.0 - sim
+            else:
+                dist = np.linalg.norm(self.X_feat_ - row, axis=1)
+            for cidx, cls in enumerate(self.classes_):
+                class_dist = dist[self.y_train_ == cls]
+                min_dist[i, cidx] = class_dist.min() if class_dist.size else np.inf
+        return stable_softmax_from_scores(min_dist, higher_is_better=False)
+
+    def get_params(self) -> dict[str, object]:
+        """Return serializable hyperparameters."""
+
+        return {
+            "attenuation": float(self.attenuation),
+            "time_scale": self.time_scale,
+            "distance": self.distance,
+            "normalize": bool(self.normalize),
+        }

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "afc-fullbench"
-version = "0.1.0"
-description = "Full-episode alarm flood classification benchmark without online or robustness evaluation."
+version = "0.2.0"
+description = "Full-episode alarm flood classification benchmark with repeated stratified cross-validation."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [

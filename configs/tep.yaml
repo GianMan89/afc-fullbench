@@ -1,34 +1,67 @@
 experiment_name: tep_full_episode
 output_dir: results/tep_full_episode
+random_seed: 42
+
+parallel:
+  n_jobs: -1
+  backend: loky
+  inner_max_num_threads: 1
+  pre_dispatch: 2*n_jobs
 
 data:
   root: data/tep
   max_time_steps: 60
+  dtype: float32
 
 cv:
   n_splits: 5
+  n_repeats: 5
   shuffle: true
   random_state: 42
 
 models:
-  - name: WDI-1NN
-  - name: JAC-1NN
-  - name: EAC-1NN
+  - name: wdi_1nn
+    display_name: WDI-1NN
+    params:
+      template_threshold: 0.5
+
+  - name: jac_1nn
+    display_name: JAC-1NN
+    params: {}
+
+  - name: eac_1nn
+    display_name: EAC-1NN
     params:
       attenuation: 0.01
-  - name: MBW-LR
+      time_scale: event_index
+      distance: euclidean
+      normalize: true
+
+  - name: mbw_lr
+    display_name: MBW-LR
     params:
       C: 1.0
-      max_iter: 2000
-      random_state: 42
-  - name: ACM-SVM
+      penalty: l2
+      solver: lbfgs
+      fit_intercept: true
+      max_iter: 1000
+      use_idf: true
+      use_time_weight: true
+
+  - name: acm_svm
+    display_name: ACM-SVM
     params:
       C: 1.0
       kernel: rbf
       gamma: scale
+      probability: true
       random_state: 42
-  - name: CASIM
+
+  - name: casim
+    display_name: CASIM
     params:
-      n_kernels: 672
+      num_features: 672
+      n_estimators: 1
+      n_jobs_multirocket: 1
       random_state: 42
-      use_sktime_if_available: true
+      backend: auto

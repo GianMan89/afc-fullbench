@@ -1,102 +1,117 @@
-"""Representation utilities for full alarm-flood episodes."""
+"""Representation utilities for complete alarm-flood episodes.
+
+The benchmark loads binary alarm-state matrices with shape
+``(n_tags, n_time_steps)``.  The functions in this module derive the three
+standard AFC views used by the implemented classifiers:
+
+* alarm sets: which tags activated at least once;
+* alarm activation sequences: rising edges ordered by time and tag index;
+* alarm series: binary active-state trajectories over time.
+"""
 
 from __future__ import annotations
 
 import numpy as np
 
-
-def validate_series_tensor(X: np.ndarray) -> np.ndarray:
-    """Return ``X`` as a binary float tensor with shape ``(n, tags, time)``."""
-    X = np.asarray(X)
-    if X.ndim != 3:
-        raise ValueError(f"Expected X with shape (n_episodes, n_tags, n_time_steps), got {X.shape}.")
-    return (X > 0).astype(np.float32, copy=False)
+from afc_fullbench.models.base import as_binary_3d, ensure_3d
 
 
-def activation_events(series: np.ndarray) -> list[tuple[int, int]]:
-    """Extract activation events from one binary alarm-series episode.
+def validate_series_tensor(X: np.ndarray, *, dtype: type = np.float32) -> np.ndarray:
+    """Return ``X`` as a binary tensor with shape ``(n, tags, time)``."""
 
-    Returns a list of ``(tag_index, time_index)`` tuples sorted by time and then tag.
-    A tag active at the first time step is treated as an activation at time zero.
+    return as_binary_3d(X, dtype=dtype)
+
+
+def activation_sequence_from_series(matrix: np.ndarray) -> list[tuple[int, int]]:
+    """Return ordered activation events ``(tag_index, time_index)``.
+
+    A tag active at the first time step is interpreted as an activation at
+    ``time_index == 0``.  Subsequent activations are rising edges in the binary
+    alarm-state trajectory.  Events are sorted by time and then by tag index.
     """
-    S = (np.asarray(series) > 0).astype(np.int8)
-    if S.ndim != 2:
-        raise ValueError("Expected one episode with shape (n_tags, n_time_steps).")
-    padded = np.pad(S, ((0, 0), (1, 0)), mode="constant")
-    rising = np.diff(padded, axis=1) > 0
-    tags, times = np.where(rising)
-    order = np.lexsort((tags, times))
-    return [(int(tags[i]), int(times[i])) for i in order]
+
+    x = (np.asarray(matrix) > 0).astype(np.int8, copy=False)
+    if x.ndim != 2:
+        raise ValueError("matrix must have shape (n_tags, n_time_steps)")
+
+    events: list[tuple[int, int]] = []
+    n_tags, _ = x.shape
+    for tag in range(n_tags):
+        if x[tag, 0] == 1:
+            events.append((tag, 0))
+        rising = np.where(np.diff(x[tag].astype(np.int8)) == 1)[0] + 1
+        for time_idx in rising:
+            events.append((tag, int(time_idx)))
+    events.sort(key=lambda item: (item[1], item[0]))
+    return events
+
+
+def active_set_vector(matrix: np.ndarray) -> np.ndarray:
+    """Return a binary vector indicating which tags are active at least once."""
+
+    x = (np.asarray(matrix) > 0).astype(np.int8, copy=False)
+    if x.ndim != 2:
+        raise ValueError("matrix must have shape (n_tags, n_time_steps)")
+    return (x.max(axis=1) > 0).astype(np.int8)
 
 
 def alarm_set_features(X: np.ndarray) -> np.ndarray:
-    """Binary alarm-set features indicating whether each tag activated during the episode."""
-    X = validate_series_tensor(X)
-    features = []
-    for episode in X:
-        events = activation_events(episode)
-        vec = np.zeros(episode.shape[0], dtype=np.float32)
-        for tag, _ in events:
-            vec[tag] = 1.0
-        features.append(vec)
-    return np.vstack(features)
+    """Return alarm-set features for a batch of complete episodes."""
+
+    X = ensure_3d(X)
+    return np.stack([active_set_vector(sample) for sample in X]).astype(np.float32)
 
 
-def activation_count_features(X: np.ndarray, *, log_scale: bool = True) -> np.ndarray:
-    """Bag-of-activation-count features for each alarm tag."""
-    X = validate_series_tensor(X)
-    features = []
-    for episode in X:
-        vec = np.zeros(episode.shape[0], dtype=np.float32)
-        for tag, _ in activation_events(episode):
-            vec[tag] += 1.0
-        if log_scale:
-            vec = np.log1p(vec)
-        features.append(vec)
-    return np.vstack(features)
+def activation_count_features(X: np.ndarray, *, log_scale: bool = False) -> np.ndarray:
+    """Return bag-of-activation-count features by alarm tag.
 
-
-def eac_features(X: np.ndarray, *, attenuation: float = 0.01) -> np.ndarray:
-    """Exponentially attenuated activation-component features.
-
-    Each activation contributes ``exp(-attenuation * rank)`` to its alarm tag,
-    where ``rank`` is the position of the activation in the full episode sequence.
+    This helper is used for diagnostics and simple baselines.  The MBW-LR
+    implementation uses its own TF--IDF and first-time weighting, following the
+    AFC-RobustBench implementation.
     """
-    X = validate_series_tensor(X)
+
+    X = ensure_3d(X)
     features = []
-    for episode in X:
-        vec = np.zeros(episode.shape[0], dtype=np.float32)
-        for rank, (tag, _) in enumerate(activation_events(episode)):
-            vec[tag] += np.exp(-float(attenuation) * rank)
-        features.append(vec)
-    return np.vstack(features)
+    for sample in X:
+        row = np.zeros(sample.shape[0], dtype=float)
+        for tag, _ in activation_sequence_from_series(sample):
+            row[tag] += 1.0
+        if log_scale:
+            row = np.log1p(row)
+        features.append(row)
+    return np.asarray(features, dtype=np.float32)
 
 
-def coactivation_matrix_features(
+def eac_features(
     X: np.ndarray,
     *,
-    include_diagonal: bool = True,
+    attenuation: float = 0.01,
+    time_scale: str = "event_index",
     normalize: bool = True,
 ) -> np.ndarray:
-    """Flattened alarm coactivation matrix features.
+    """Return exponentially attenuated component features.
 
-    For each episode, the coactivation matrix is ``S @ S.T`` where ``S`` is the
-    binary alarm-state matrix with shape ``(n_tags, n_time_steps)``.
+    Each activation contributes ``exp(-attenuation * t)`` to its tag component,
+    where ``t`` is either the activation-event index or the discrete time index.
     """
-    X = validate_series_tensor(X)
+
+    X = ensure_3d(X)
     features = []
-    for episode in X:
-        T = max(1, episode.shape[1])
-        mat = episode @ episode.T
+    for sample in X:
+        row = np.zeros(sample.shape[0], dtype=float)
+        for event_index, (tag, time_idx) in enumerate(activation_sequence_from_series(sample)):
+            t = event_index if time_scale == "event_index" else time_idx
+            row[tag] += float(np.exp(-float(attenuation) * t))
         if normalize:
-            mat = mat / float(T)
-        k = 0 if include_diagonal else 1
-        tri = np.triu_indices(mat.shape[0], k=k)
-        features.append(mat[tri].astype(np.float32, copy=False))
-    return np.vstack(features)
+            norm = np.linalg.norm(row)
+            if norm > 0:
+                row = row / norm
+        features.append(row)
+    return np.asarray(features, dtype=np.float32)
 
 
 def flatten_series_features(X: np.ndarray) -> np.ndarray:
-    """Flatten full binary alarm series for generic time-series classifiers."""
+    """Flatten full binary alarm series into one vector per episode."""
+
     X = validate_series_tensor(X)
     return X.reshape(X.shape[0], -1)

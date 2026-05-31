@@ -1,4 +1,4 @@
-"""AFC model implementations."""
+"""AFC model implementations for full-episode classification."""
 
 from afc_fullbench.models.acm_svm import ACMSVM
 from afc_fullbench.models.casim import CASIM

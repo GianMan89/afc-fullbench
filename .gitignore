@@ -8,9 +8,17 @@ __pycache__/
 .ruff_cache/
 .ipynb_checkpoints/
 
-# Data and outputs
+# Local data and generated outputs
+data/**
+!data/.gitkeep
+!data/tep/
+!data/tep/.gitkeep
+!data/fcc/
+!data/fcc/.gitkeep
 results/**
 !results/.gitkeep
+figures/**
+!figures/.gitkeep
 
 # OS/editor
 .DS_Store

@@ -1,6 +1,13 @@
 # Data layout
 
-AFC-FullBench does not track raw datasets. Place binary alarm activity CSV files under `data/tep/` and `data/fcc/` with one subfolder per class.
+AFC-FullBench does not ship raw data. Place the datasets manually under:
+
+```text
+data/tep/
+data/fcc/
+```
+
+Each dataset root must contain one subfolder per class. Each class folder must contain one CSV file per alarm-flood episode:
 
 ```text
 data/tep/
@@ -12,9 +19,12 @@ data/tep/
 └── ...
 ```
 
-Each CSV file should contain one row per time step and one column per alarm tag. Optional time columns named `Minutes`, `time`, `timestamp`, `t`, `minute`, `sec`, or `seconds` are ignored by the loader.
+Each CSV file is expected to contain a binary alarm activity matrix with one row per time step and one column per alarm tag. A time column named `Minutes`, `time`, `timestamp`, `t`, `minute`, `sec`, or `seconds` is removed automatically.
 
-The paper datasets can be obtained from:
+The loader converts each dataset to a tensor with shape:
 
-- Tennessee-Eastman Process alarm dataset: https://dx.doi.org/10.21227/326k-qr90
-- Fluidized Catalytic Cracking alarm dataset: https://doi.org/10.60517/2v23vv393
+```text
+(n_episodes, n_alarm_tags, n_time_steps)
+```
+
+Episodes are truncated or zero-padded to the horizon specified in the YAML configuration.

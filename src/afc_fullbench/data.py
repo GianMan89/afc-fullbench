@@ -72,7 +72,7 @@ def load_alarm_series_dataset(
     *,
     max_time_steps: int | None = None,
     time_columns: Iterable[str] = _DEFAULT_TIME_COLUMNS,
-    dtype: type = np.float32,
+    dtype: type | str = np.float32,
 ) -> AlarmDataset:
     """Load a class-folder alarm-series dataset.
 
@@ -91,6 +91,7 @@ def load_alarm_series_dataset(
     """
 
     root = Path(root)
+    dtype = np.dtype(dtype)
     if not root.exists():
         raise FileNotFoundError(f"Dataset root does not exist: {root}")
 
