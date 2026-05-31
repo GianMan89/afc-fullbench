@@ -15,7 +15,7 @@ data:
 
 cv:
   n_splits: 5
-  n_repeats: 5
+  n_repeats: 10
   shuffle: true
   random_state: 42
 
