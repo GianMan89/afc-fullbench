@@ -1,0 +1,34 @@
+experiment_name: tep_full_episode
+output_dir: results/tep_full_episode
+
+data:
+  root: data/tep
+  max_time_steps: 60
+
+cv:
+  n_splits: 5
+  shuffle: true
+  random_state: 42
+
+models:
+  - name: WDI-1NN
+  - name: JAC-1NN
+  - name: EAC-1NN
+    params:
+      attenuation: 0.01
+  - name: MBW-LR
+    params:
+      C: 1.0
+      max_iter: 2000
+      random_state: 42
+  - name: ACM-SVM
+    params:
+      C: 1.0
+      kernel: rbf
+      gamma: scale
+      random_state: 42
+  - name: CASIM
+    params:
+      n_kernels: 672
+      random_state: 42
+      use_sktime_if_available: true
