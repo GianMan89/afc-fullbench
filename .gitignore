@@ -9,7 +9,6 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Data and outputs
-data/**/*.csv
 results/**
 !results/.gitkeep
 
